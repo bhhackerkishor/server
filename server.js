@@ -10,7 +10,7 @@ app.use(express.json());
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*", // change to frontend URL in production
+    origin: "*", // change to your frontend URL in production
     methods: ["GET", "POST"]
   }
 });
@@ -24,7 +24,7 @@ io.on("connection", (socket) => {
 
   socket.on("register", (name) => {
     userData.set(socket.id, { name, status: "online" });
-    io.to(socket.id).emit("status", "Registered as " + name);
+    io.to(socket.id).emit("status", `Registered as ${name}`);
   });
 
   socket.on("find-partner", () => {
@@ -34,6 +34,7 @@ io.on("connection", (socket) => {
     user.status = "waiting";
     console.log(`🔍 ${user.name} (${socket.id}) is looking for a partner...`);
 
+    // Pair logic
     if (waitingUser && waitingUser !== socket.id) {
       const partnerId = waitingUser;
       waitingUser = null;
@@ -47,8 +48,20 @@ io.on("connection", (socket) => {
       activePairs.set(socket.id, partnerId);
       activePairs.set(partnerId, socket.id);
 
-      io.to(socket.id).emit("partner-found", { partnerId, partnerName: partner.name });
-      io.to(partnerId).emit("partner-found", { partnerId: socket.id, partnerName: user.name });
+      // Decide who creates the offer
+      const initiator = Math.random() < 0.5 ? socket.id : partnerId;
+
+      io.to(socket.id).emit("partner-found", {
+        partnerId,
+        partnerName: partner.name,
+        initiator: socket.id === initiator
+      });
+
+      io.to(partnerId).emit("partner-found", {
+        partnerId: socket.id,
+        partnerName: user.name,
+        initiator: partnerId === initiator
+      });
 
       console.log(`🤝 ${user.name} paired with ${partner.name}`);
     } else {
@@ -58,29 +71,36 @@ io.on("connection", (socket) => {
     }
   });
 
-  // WebRTC signaling exchange
+  // WebRTC signaling
   socket.on("signal", (data) => {
-    const partnerId = activePairs.get(socket.id);
-    if (partnerId) io.to(partnerId).emit("signal", data);
+    const { to, ...payload } = data;
+    if (!to) return;
+
+    if (io.sockets.sockets.get(to)) {
+      io.to(to).emit("signal", { from: socket.id, ...payload });
+    }
   });
 
-  socket.on("end-call", () => {
-    const partnerId = activePairs.get(socket.id);
+  // End call
+  socket.on("end-call", ({ partnerId }) => {
     const user = userData.get(socket.id);
     if (partnerId) {
       io.to(partnerId).emit("call-ended");
       console.log(`📞 Call ended by ${user?.name || socket.id}`);
+
       const partner = userData.get(partnerId);
       if (partner) partner.status = "online";
-      user.status = "online";
+      if (user) user.status = "online";
+
       activePairs.delete(socket.id);
       activePairs.delete(partnerId);
     }
   });
 
+  // Disconnect handling
   socket.on("disconnect", () => {
     const user = userData.get(socket.id);
-    console.log(`🔴 ${user?.name || "Unknown user"} disconnected`);
+    console.log(`🔴 ${user?.name || "Unknown"} disconnected`);
 
     if (waitingUser === socket.id) waitingUser = null;
 
@@ -89,6 +109,7 @@ io.on("connection", (socket) => {
       io.to(partnerId).emit("partner-left");
       const partner = userData.get(partnerId);
       if (partner) partner.status = "online";
+
       activePairs.delete(socket.id);
       activePairs.delete(partnerId);
     }
@@ -97,5 +118,5 @@ io.on("connection", (socket) => {
   });
 });
 
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
