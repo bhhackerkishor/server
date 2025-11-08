@@ -21,9 +21,11 @@ const userData = new Map(); // socket.id -> { name, status }
 
 io.on("connection", (socket) => {
   console.log(`🟢 User connected: ${socket.id}`);
+  io.emit("user-count", io.engine.clientsCount); 
 
   socket.on("register", (name) => {
     userData.set(socket.id, { name, status: "online" });
+    io.emit("user-count", io.engine.clientsCount); // send count to all users
     io.to(socket.id).emit("status", `Registered as ${name}`);
   });
 
@@ -112,6 +114,7 @@ io.on("connection", (socket) => {
 
       activePairs.delete(socket.id);
       activePairs.delete(partnerId);
+      io.emit("user-count", io.engine.clientsCount); 
     }
 
     userData.delete(socket.id);
@@ -120,3 +123,4 @@ io.on("connection", (socket) => {
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+
